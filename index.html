@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>embossed</title>
+<title>EMBOSSED</title>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;background:#f7f6f2;color:#171717;font-family:Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -37,24 +37,9 @@ button:active{transform:scale(.99)}
 
 #reset{background:#fff!important;color:#2196f3!important;border-color:#111!important}
 </style>
-<style id="home-nav-style">
-#homeNav{
- flex:0 0 42px;
- width:42px;
- height:42px;
- margin:0;
- transform:none;
- border:1px solid #ddd;
- border-radius:12px;
- background:rgba(255,255,255,.96);
- font:700 18px Pretendard,sans-serif;
- color:#111;
- cursor:pointer;
- box-shadow:0 3px 12px rgba(0,0,0,.08);
-}
-</style></head><body>
+</head><body>
 <main>
-<div class="pageTitle"><button id="homeNav" aria-label="홈으로" onclick="location.href='index.html'">⌂</button><h1>embossed</h1></div>
+<h1>EMBOSSED</h1>
 
 <section class="card">
   <div class="stage" id="stage">
@@ -298,10 +283,10 @@ $('save').onclick=async()=>{
   await new Promise(requestAnimationFrame);
   canvas.toBlob(async blob=>{
     if(!blob){alert('PNG 저장에 실패했어요. 다시 시도해주세요.');return;}
-    const file=new File([blob],'embossed.png',{type:'image/png',lastModified:Date.now()});
+    const file=new File([blob],'EMBOSSED.png',{type:'image/png',lastModified:Date.now()});
     if(matchMedia('(pointer:coarse)').matches&&navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
       try{
-        await navigator.share({files:[file],title:'embossed',text:''});
+        await navigator.share({files:[file],title:'EMBOSSED',text:''});
         return;
       }catch(err){
         if(err?.name==='AbortError')return;
@@ -309,7 +294,7 @@ $('save').onclick=async()=>{
     }
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=url;a.download='embossed.png';
+    a.href=url;a.download='EMBOSSED.png';
     document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   },'image/png');
