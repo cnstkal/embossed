@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>CAMERA INTERFACE</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#f7f7f5;color:#111;font-family:Pretendard,system-ui,sans-serif}
+body{touch-action:pan-y;overflow-x:hidden}
+main{width:min(760px,100%);margin:auto;padding:18px 10px 30px}
+h1{font-size:24px;margin:0 2px 12px;font-weight:800;letter-spacing:-.04em}
+.card{background:#fff;border:1px solid #e4e4df;border-radius:20px;padding:12px;margin-bottom:10px;box-shadow:0 2px 10px rgba(0,0,0,.035)}
+ .stage{width:100%;aspect-ratio:1;background-color:#f1f1ee;background-image:linear-gradient(45deg,#e7e7e3 25%,transparent 25%),linear-gradient(-45deg,#e7e7e3 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e7e7e3 75%),linear-gradient(-45deg,transparent 75%,#e7e7e3 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0;border-radius:16px;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+#view{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#photo{position:absolute;max-width:100%;max-height:100%;width:auto;height:auto;display:block;user-select:none;-webkit-user-drag:none;pointer-events:none}
+#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+.upload{display:flex;align-items:center;justify-content:center;min-height:60px;border:1px dashed #cfcfc8;border-radius:15px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:10px}
+.upload input{display:none}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{font-size:13px;color:#777}
+select,input[type=range],input[type=color],input[type=text]{width:100%;margin-top:6px}
+select,input[type=text]{height:46px;border:1px solid #ddd;border-radius:12px;background:#fff;padding:0 10px;font:inherit;font-size:16px;color:#111}
+input[type=range]{accent-color:#111}
+input[type=color]{height:46px;padding:3px;border:1px solid #ddd;border-radius:12px;background:#fff}.small-color{width:42px!important;height:34px!important;padding:2px!important;display:block}.small-color{width:42px!important;height:34px!important;padding:2px!important;display:block}
+.val{float:right;color:#111;font-weight:700}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+button{height:48px;border:1px solid #ddd;border-radius:13px;background:#fff;font:700 15px Pretendard}
+.primary{background:#111;color:#fff;border-color:#111}
+@media(min-width:721px){main{padding:20px}.stage{max-height:calc(100vh - 100px)}}
+.pageTitle{display:flex;align-items:center;gap:10px;margin:0 2px 12px}
+@media(min-width:721px){
+ .pageTitle{grid-column:1/-1}
+ .pageTitle h1{margin:0}
+}
+
+#reset{background:#fff!important;color:#2196f3!important;border-color:#111!important}
+</style>
+</head>
+<body>
+<main>
+<div class="pageTitle"><h1>CAMERA INTERFACE</h1></div>
+<section class="card">
+<div class="stage"><div id="view"><img id="photo" hidden><canvas id="overlay"></canvas></div></div>
+</section>
+<section class="card">
+<label class="upload">📷 사진 업로드<input id="file" type="file" accept="image/*"></label>
+<div class="grid">
+<label>레이블<input id="label" type="text" value="#5389 // MANUAL" maxlength="32"></label>
+<label>프레임 색상<input id="color" type="color" value="#ff3030"></label>
+<label>프레임 형태<select id="frameType"><option value="box" selected>사각형</option><option value="corners">테두리만</option></select></label>
+<div></div>
+<label>박스 크기 <span class="val" id="sizeVal">100%</span><input id="size" type="range" min="60" max="150" value="100"></label>
+<label>인식 개수 <span class="val" id="countVal">1</span><input id="count" type="range" min="1" max="12" value="1"></label>
+<label>레이블 크기 <span class="val" id="labelSizeVal">100%</span><input id="labelSize" type="range" min="20" max="120" value="100"></label>
+<label>선 두께 <span class="val" id="thicknessVal">3px</span><input id="thickness" type="range" min="1" max="8" value="3"></label>
+<label>회전 <span class="val" id="rotationVal">0°</span><input id="rotation" type="range" min="-180" max="180" value="0"></label>
+</div>
+<div class="actions"><button id="reset">초기화</button><button id="save" class="primary">PNG 저장</button></div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id),photo=$('photo'),canvas=$('overlay'),ctx=canvas.getContext('2d');
+let image=null,boxes=[],drag=null,sourceUrl=null,lastSize=100,rotation=0;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const DB_NAME='camera-interface-db',STORE='state';
+function openDB(){
+ return new Promise((resolve,reject)=>{
+  const req=indexedDB.open(DB_NAME,1);
+  req.onupgradeneeded=()=>req.result.createObjectStore(STORE);
+  req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+ });
+}
+async function saveState(){
+ try{
+  const db=await openDB(),tx=db.transaction(STORE,'readwrite'),s=tx.objectStore(STORE);
+  const data={image:sourceUrl||null,boxes, count:+$('count').value,color:$('color').value,label:$('label').value,size:+$('size').value,thickness:+$('thickness').value,labelSize:+$('labelSize').value,frameType:$('frameType').value,rotation:+$('rotation').value};
+  s.put(data,'current');
+ }catch(e){}
+}
+async function loadState(){
+ try{
+  const db=await openDB(),tx=db.transaction(STORE,'readonly'),req=tx.objectStore(STORE).get('current');
+  req.onsuccess=()=>{
+   const s=req.result;if(!s)return;
+   $('count').value=clamp(s.count||1,1,12);$('countVal').textContent=$('count').value;
+   $('color').value=s.color||'#ff3030';$('label').value=s.label||'#5389 // MANUAL';
+   $('size').value=s.size||100;lastSize=+$('size').value;$('sizeVal').textContent=$('size').value+'%';$('frameType').value=s.frameType||'box';$('thickness').value=s.thickness||3;$('rotation').value=clamp(s.rotation??0,-180,180);rotation=+$('rotation').value;$('rotationVal').textContent=rotation+'°';$('thicknessVal').textContent=$('thickness').value+'px';$('labelSize').value=(s.labelSize&&s.labelSize<=20)?100:(s.labelSize||100);$('labelSizeVal').textContent=$('labelSize').value+'%';
+   if(s.image){
+    const im=new Image();
+    im.onload=()=>{image=im;photo.src=s.image;photo.hidden=false;fitCanvas();const base=makeBaseBox();boxes=(s.boxes||[]).map(b=>({...b}));if(!boxes.length)boxes=[base];syncBoxes(false);};
+    im.src=s.image;sourceUrl=s.image;
+   }
+  };
+ }catch(e){}
+}
+function fitCanvas(){
+ const r=$('view').getBoundingClientRect();
+ const oldW=canvas._cssW||r.width,oldH=canvas._cssH||r.height;
+ const newW=Math.max(1,Math.round(r.width)),newH=Math.max(1,Math.round(r.height));
+ canvas._cssW=newW;canvas._cssH=newH;
+ const dpr=Math.max(1,window.devicePixelRatio||1);
+ canvas.width=Math.round(newW*dpr);canvas.height=Math.round(newH*dpr);
+ canvas.style.width=newW+'px';canvas.style.height=newH+'px';
+ if(boxes.length&&oldW&&oldH&&(oldW!==newW||oldH!==newH)){
+  const sx=newW/oldW,sy=newH/oldH;
+  boxes.forEach(b=>{b.x*=sx;b.y*=sy;b.w*=sx;b.h*=sy});
+  constrainBoxes();
+ }
+ draw();
+}
+function imageRect(){
+ if(!image)return null;
+ const vr=$('view').getBoundingClientRect(),s=Math.min(vr.width/image.naturalWidth,vr.height/image.naturalHeight);
+ const w=image.naturalWidth*s,h=image.naturalHeight*s;
+ return{x:(vr.width-w)/2,y:(vr.height-h)/2,w,h,s};
+}
+function makeBaseBox(){
+ const r=imageRect(),factor=(+$('size').value||100)/100;
+ const w=(r?Math.max(120,Math.min(r.w*.48,Math.min(320,r.w*.72))):180)*factor;
+ const h=(r?Math.max(100,Math.min(r.h*.42,Math.min(280,r.h*.68))):160)*factor;
+ return {x:r?r.x+Math.max(0,(r.w-w)/2):20,y:r?r.y+Math.max(0,(r.h-h)/3):20,w,h};
+}
+function makeBox(i){
+ const t=boxes[0]||makeBaseBox(),r=imageRect();
+ const gap=Math.min(t.w*.14,t.h*.14);
+ const col=i%3,row=Math.floor(i/3);
+ const x=t.x+(col-1)*(t.w+gap),y=t.y+row*(t.h+gap);
+ return {x:clamp(x,r?.x||0,(r?r.x+r.w:canvas.width)-t.w),y:clamp(y,r?.y||0,(r?r.y+r.h:canvas.height)-t.h),w:t.w,h:t.h};
+}
+function constrainBoxes(){
+ const r=imageRect();
+ boxes.forEach(b=>{
+  b.w=clamp(b.w,80,(r?r.w:canvas.width));b.h=clamp(b.h,70,(r?r.h:canvas.height));
+  b.x=clamp(b.x,r?.x||0,(r?r.x+r.w:canvas.width)-b.w);
+  b.y=clamp(b.y,r?.y||0,(r?r.y+r.h:canvas.height)-b.h);
+ });
+}
+function syncBoxes(save=true){
+ const n=+$('count').value;
+ if(!boxes.length)boxes=[makeBaseBox()];
+ const t=boxes[0] ? {x:boxes[0].x,y:boxes[0].y,w:boxes[0].w,h:boxes[0].h} : makeBaseBox();
+ while(boxes.length<n){
+  const i=boxes.length;
+  const r=imageRect(),gap=Math.min(t.w*.14,t.h*.14),col=i%3,row=Math.floor(i/3);
+  const x=t.x+(col-1)*(t.w+gap),y=t.y+row*(t.h+gap);
+  boxes.push({x:clamp(x,r?.x||0,(r?r.x+r.w:canvas.width)-t.w),y:clamp(y,r?.y||0,(r?r.y+r.h:canvas.height)-t.h),w:t.w,h:t.h});
+ }
+ boxes=boxes.slice(0,n);constrainBoxes();draw();if(save)saveState();
+}
+function draw(){
+ if(!canvas.width)return;
+ const dpr=Math.max(1,window.devicePixelRatio||1);
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ ctx.clearRect(0,0,canvas._cssW||canvas.width/dpr,canvas._cssH||canvas.height/dpr);
+ const color=$('color').value,frameType=$('frameType').value;
+ ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=+$('thickness').value;const labelScale=(+$('labelSize').value/100)*(+$('size').value/100);ctx.font='700 '+(11*labelScale)+'px Pretendard,sans-serif';ctx.textBaseline='alphabetic';
+ boxes.forEach(b=>{
+  ctx.save();
+  const cx=b.x+b.w/2,cy=b.y+b.h/2;
+  ctx.translate(cx,cy);
+  ctx.rotate(rotation*Math.PI/180);
+  ctx.translate(-cx,-cy);
+  const len=Math.min(34,Math.min(b.w,b.h)*.18);
+  ctx.beginPath();
+  if(frameType==='box') {
+    ctx.rect(b.x,b.y,b.w,b.h);
+  } else {
+    ctx.moveTo(b.x+len,b.y);ctx.lineTo(b.x,b.y);ctx.lineTo(b.x,b.y+len);
+    ctx.moveTo(b.x+b.w-len,b.y);ctx.lineTo(b.x+b.w,b.y);ctx.lineTo(b.x+b.w,b.y+len);
+    ctx.moveTo(b.x,b.y+b.h-len);ctx.lineTo(b.x,b.y+b.h);ctx.lineTo(b.x+len,b.y+b.h);
+    ctx.moveTo(b.x+b.w-len,b.y+b.h);ctx.lineTo(b.x+b.w,b.y+b.h);ctx.lineTo(b.x+b.w,b.y+b.h-len);
+  }
+  ctx.stroke();
+  const txt=(($('label').value||'#5389 // MANUAL').trim()).slice(0,32);
+  const tw=ctx.measureText(txt).width+12*labelScale;
+  const labelH=22*labelScale,labelX=b.x-ctx.lineWidth/2;
+  ctx.fillStyle=color;ctx.fillRect(labelX,b.y-labelH,tw+ctx.lineWidth/2,labelH);
+  ctx.fillStyle='#111';ctx.fillText(txt,labelX+6*labelScale,b.y-7*labelScale);
+  ctx.restore();
+ });
+}
+function hit(x,y){
+ for(let i=boxes.length-1;i>=0;i--){const b=boxes[i];if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h)return i}
+ return -1;
+}
+function resizeHit(x,y){
+ for(let i=boxes.length-1;i>=0;i--){const b=boxes[i];if(Math.hypot(x-(b.x+b.w),y-(b.y+b.h))<24)return i}
+ return -1;
+}
+function point(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
+canvas.addEventListener('pointerdown',e=>{
+ const p=point(e),ri=resizeHit(p.x,p.y);
+ if(ri>=0){drag={i:ri,resize:true,dx:p.x-(boxes[ri].x+boxes[ri].w),dy:p.y-(boxes[ri].y+boxes[ri].h)};canvas.setPointerCapture(e.pointerId);return}
+ const i=hit(p.x,p.y);if(i<0)return;
+ const b=boxes[i];drag={i,dx:p.x-b.x,dy:p.y-b.y};canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove',e=>{
+ if(!drag)return;
+ const p=point(e),b=boxes[drag.i],r=imageRect();
+ if(drag.resize){
+  b.w=clamp(p.x-b.x-drag.dx,80,(r?r.x+r.w:canvas.width)-b.x);
+  b.h=clamp(p.y-b.y-drag.dy,70,(r?r.y+r.h:canvas.height)-b.y);
+ }else{
+  b.x=clamp(p.x-drag.dx,r?r.x:0,(r?r.x+r.w:canvas.width)-b.w);
+  b.y=clamp(p.y-drag.dy,r?r.y:0,(r?r.y+r.h:canvas.height)-b.h);
+ }
+ draw();
+});
+canvas.addEventListener('pointerup',()=>{if(drag)saveState();drag=null});
+canvas.addEventListener('pointercancel',()=>{if(drag)saveState();drag=null});
+$('file').onchange=e=>{
+ const f=e.target.files?.[0];if(!f)return;
+ if(!f.type||!f.type.startsWith('image/')){alert('이미지 파일만 업로드할 수 있어요.');e.target.value='';return}
+ if(sourceUrl?.startsWith('blob:'))URL.revokeObjectURL(sourceUrl);
+ const reader=new FileReader();
+ reader.onerror=()=>{alert('이미지를 읽지 못했어요. 다시 시도해주세요.');e.target.value=''};
+ reader.onload=()=>{
+  sourceUrl=reader.result;
+  const im=new Image();
+  im.onload=()=>{image=im;photo.src=sourceUrl;photo.hidden=false;fitCanvas();boxes=[makeBaseBox()];syncBoxes();};
+  im.onerror=()=>{alert('이 이미지는 브라우저에서 읽을 수 없어요. JPG/PNG/WebP 등을 사용해주세요.');sourceUrl=null;e.target.value=''};
+  im.src=sourceUrl;
+ };
+ reader.readAsDataURL(f);
+};
+$('count').oninput=()=>{$('countVal').textContent=$('count').value;syncBoxes()};
+$('color').oninput=()=>{draw();saveState()};
+$('label').oninput=()=>{draw();saveState()};
+$('frameType').onchange=()=>{draw();saveState()};
+$('rotation').oninput=()=>{rotation=+$('rotation').value;$('rotationVal').textContent=rotation+'°';draw();saveState()};
+$('thickness').oninput=()=>{$('thicknessVal').textContent=$('thickness').value+'px';draw();saveState()};
+$('labelSize').oninput=()=>{$('labelSizeVal').textContent=$('labelSize').value+'%';draw();saveState()};
+$('size').oninput=()=>{
+ const next=+$('size').value, factor=next/Math.max(1,lastSize);
+ $('sizeVal').textContent=next+'%';
+ if(boxes.length){
+  boxes.forEach(b=>{
+   const cx=b.x+b.w/2,cy=b.y+b.h/2;
+   b.w*=factor;b.h*=factor;
+   b.x=cx-b.w/2;b.y=cy-b.h/2;
+  });
+  constrainBoxes();
+ }
+ lastSize=next;
+ draw();saveState();
+};
+window.addEventListener('resize',()=>{if(image)fitCanvas()});
+window.addEventListener('beforeunload',()=>{try{saveState()}catch(e){}});
+$('reset').onclick=async()=>{
+ image=null;boxes=[];drag=null;sourceUrl=null;lastSize=100;photo.hidden=true;photo.removeAttribute('src');$('file').value='';
+ $('count').value=1;$('countVal').textContent='1';$('color').value='#ff3030';$('label').value='#5389 // MANUAL';$('size').value=100;$('sizeVal').textContent='100%';$('thickness').value=3;$('thicknessVal').textContent='3px';$('labelSize').value=100;$('labelSizeVal').textContent='100%';$('rotation').value=0;rotation=0;$('rotationVal').textContent='0°';
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ try{const db=await openDB(),tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete('current')}catch(e){}
+};
+$('save').onclick=()=>{
+ if(!image)return;
+ const r=imageRect();
+ const exportScale=Math.min(2,8192/Math.max(image.naturalWidth,image.naturalHeight));
+ const out=document.createElement('canvas');
+ out.width=Math.round(image.naturalWidth*exportScale);
+ out.height=Math.round(image.naturalHeight*exportScale);
+ const o=out.getContext('2d'),sx=(image.naturalWidth*exportScale)/r.w,sy=(image.naturalHeight*exportScale)/r.h;
+ o.imageSmoothingEnabled=true;
+ o.imageSmoothingQuality='high';
+ o.drawImage(image,0,0,out.width,out.height);
+ o.strokeStyle=$('color').value;o.fillStyle=$('color').value;o.lineWidth=Math.max(1,+$('thickness').value*sx);const labelScale=(+$('labelSize').value/100)*(+$('size').value/100);o.font='700 '+Math.max(1,Math.round(11*labelScale*sx))+'px Pretendard,sans-serif';
+ boxes.forEach(b=>{
+  const x=(b.x-r.x)*sx,y=(b.y-r.y)*sy,w=b.w*sx,h=b.h*sy,len=Math.min(34*sx,Math.min(w,h)*.18);
+  o.save();
+  o.translate(x+w/2,y+h/2);o.rotate(rotation*Math.PI/180);o.translate(-(x+w/2),-(y+h/2));
+  o.beginPath();
+  if($('frameType').value==='box') {
+    o.rect(x,y,w,h);
+  } else {
+    o.moveTo(x+len,y);o.lineTo(x,y);o.lineTo(x,y+len);
+    o.moveTo(x+w-len,y);o.lineTo(x+w,y);o.lineTo(x+w,y+len);
+    o.moveTo(x,y+h-len);o.lineTo(x,y+h);o.lineTo(x+len,y+h);
+    o.moveTo(x+w-len,y+h);o.lineTo(x+w,y+h);o.lineTo(x+w,y+h-len);
+  }
+  o.stroke();
+  const txt=(($('label').value||'#5389 // MANUAL').trim()).slice(0,32);
+  o.font='700 '+Math.max(1,Math.round(11*labelScale*sx))+'px Pretendard,sans-serif';
+  const tw=o.measureText(txt).width+12*labelScale*sx;
+  const labelH=22*labelScale*sx;
+  const labelW=tw+o.lineWidth/2;
+  // 사진 위쪽 끝에 붙은 박스는 레이블을 위로 그리면 PNG 밖으로 잘리므로 안쪽에 배치
+  const labelInside=y-labelH<0;
+  const labelY=labelInside?y:y-labelH;
+  const textY=labelInside?y+labelH-7*labelScale*sx:y-7*labelScale*sx;
+  const labelX=Math.max(0,Math.min(out.width-labelW,x-o.lineWidth/2));
+  o.fillStyle=$('color').value;
+  o.fillRect(labelX,labelY,labelW,labelH);
+  o.fillStyle='#111';
+  o.fillText(txt,labelX+6*labelScale*sx,textY);
+  o.restore();
+ });
+ const isPng=/^data:image\/png/i.test(sourceUrl||'');
+ const mime='image/png',ext='png',quality=undefined;
+ out.toBlob(async blob=>{
+  if(!blob){alert('PNG 저장에 실패했어요. 다시 시도해주세요.');return}
+  const file=new File([blob],`camera-interface.${ext}`,{type:mime});
+  if(matchMedia('(pointer:coarse)').matches&&navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
+   try{await navigator.share({files:[file],title:'camera-interface'});return}catch(e){if(e?.name==='AbortError')return}
+  }
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`camera-interface.${ext}`;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+ },mime,quality);
+};
+loadState();
+</script>
+</body>
+</html>
