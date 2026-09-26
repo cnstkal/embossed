@@ -277,7 +277,7 @@ $('save').onclick=()=>{
  const maxPixels=32000000;
  const scaleByDimension=maxDimension/Math.max(image.naturalWidth,image.naturalHeight);
  const scaleByPixels=Math.sqrt(maxPixels/(image.naturalWidth*image.naturalHeight));
- const exportScale=Math.min(2,1,scaleByDimension,scaleByPixels);
+ const exportScale=Math.min(2,scaleByDimension,scaleByPixels);
  const out=document.createElement('canvas');
  out.width=Math.max(1,Math.round(image.naturalWidth*exportScale));
  out.height=Math.max(1,Math.round(image.naturalHeight*exportScale));
