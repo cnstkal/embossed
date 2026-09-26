@@ -61,7 +61,9 @@ button{height:48px;border:1px solid #ddd;border-radius:13px;background:#fff;font
 </section>
 </main>
 <script>
-const $=id=>document.getElementById(id),photo=$('photo'),canvas=$('overlay'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id),photo=$('photo'),canvas=$('overlay'),ctx=canvas.getContext('2d',{alpha:true,desynchronized:false});
+if(!ctx)throw new Error('Canvas is not supported by this browser.');
+canvas.style.touchAction='none';
 let image=null,boxes=[],drag=null,sourceUrl=null,lastSize=100,rotation=0;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const DB_NAME='camera-interface-db',STORE='state';
@@ -208,11 +210,18 @@ canvas.addEventListener('pointermove',e=>{
  }
  draw();
 });
-canvas.addEventListener('pointerup',()=>{if(drag)saveState();drag=null});
-canvas.addEventListener('pointercancel',()=>{if(drag)saveState();drag=null});
+function endPointer(e){
+ if(drag)saveState();
+ try{if(e?.pointerId!=null)canvas.releasePointerCapture(e.pointerId)}catch(err){}
+ drag=null;
+}
+canvas.addEventListener('pointerup',endPointer);
+canvas.addEventListener('pointercancel',endPointer);
+canvas.addEventListener('lostpointercapture',()=>{if(drag){saveState();drag=null}});
 $('file').onchange=e=>{
  const f=e.target.files?.[0];if(!f)return;
  if(!f.type||!f.type.startsWith('image/')){alert('이미지 파일만 업로드할 수 있어요.');e.target.value='';return}
+ if(f.size>60*1024*1024){alert('파일이 너무 커요. 60MB 이하의 이미지를 사용해주세요.');e.target.value='';return}
  if(sourceUrl?.startsWith('blob:'))URL.revokeObjectURL(sourceUrl);
  const reader=new FileReader();
  reader.onerror=()=>{alert('이미지를 읽지 못했어요. 다시 시도해주세요.');e.target.value=''};
@@ -254,14 +263,27 @@ $('reset').onclick=async()=>{
  ctx.clearRect(0,0,canvas.width,canvas.height);
  try{const db=await openDB(),tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete('current')}catch(e){}
 };
+function dataURLToBlob(dataUrl){
+ const parts=dataUrl.split(',');
+ const bytes=atob(parts[1]),arr=new Uint8Array(bytes.length);
+ for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
+ return new Blob([arr],{type:mimeFromDataUrl(dataUrl)});
+}
+function mimeFromDataUrl(dataUrl){return (dataUrl.match(/^data:([^;]+)/)||[])[1]||'image/png'}
 $('save').onclick=()=>{
  if(!image)return;
  const r=imageRect();
- const exportScale=Math.min(2,8192/Math.max(image.naturalWidth,image.naturalHeight));
+ const maxDimension=8192;
+ const maxPixels=32000000;
+ const scaleByDimension=maxDimension/Math.max(image.naturalWidth,image.naturalHeight);
+ const scaleByPixels=Math.sqrt(maxPixels/(image.naturalWidth*image.naturalHeight));
+ const exportScale=Math.min(2,1,scaleByDimension,scaleByPixels);
  const out=document.createElement('canvas');
- out.width=Math.round(image.naturalWidth*exportScale);
- out.height=Math.round(image.naturalHeight*exportScale);
- const o=out.getContext('2d'),sx=(image.naturalWidth*exportScale)/r.w,sy=(image.naturalHeight*exportScale)/r.h;
+ out.width=Math.max(1,Math.round(image.naturalWidth*exportScale));
+ out.height=Math.max(1,Math.round(image.naturalHeight*exportScale));
+ const o=out.getContext('2d');
+ if(!o){alert('저장용 캔버스를 만들지 못했어요. 이미지 크기를 줄여 다시 시도해주세요.');return}
+ const sx=out.width/r.w,sy=out.height/r.h;
  o.imageSmoothingEnabled=true;
  o.imageSmoothingQuality='high';
  o.drawImage(image,0,0,out.width,out.height);
@@ -296,9 +318,8 @@ $('save').onclick=()=>{
   o.fillText(txt,labelX+6*labelScale*sx,textY);
   o.restore();
  });
- const isPng=/^data:image\/png/i.test(sourceUrl||'');
  const mime='image/png',ext='png',quality=undefined;
- out.toBlob(async blob=>{
+ const finishBlob=async blob=>{
   if(!blob){alert('PNG 저장에 실패했어요. 다시 시도해주세요.');return}
   const file=new File([blob],`camera-interface.${ext}`,{type:mime});
   if(matchMedia('(pointer:coarse)').matches&&navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
@@ -306,7 +327,12 @@ $('save').onclick=()=>{
   }
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`camera-interface.${ext}`;a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
- },mime,quality);
+};
+if(out.toBlob){
+  out.toBlob(finishBlob,mime,quality);
+}else{
+  try{finishBlob(dataURLToBlob(out.toDataURL(mime)))}catch(e){alert('PNG 저장에 실패했어요. 다시 시도해주세요.')}
+}
 };
 loadState();
 </script>
